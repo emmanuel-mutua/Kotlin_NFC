@@ -20,6 +20,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -60,9 +61,7 @@ class MainActivity : ComponentActivity(), NfcAdapter.ReaderCallback, EMVReaderLo
                 NavHost(navController = navController, startDestination = "start") {
                     composable("start") {
                         StartController(
-                            this@MainActivity,
-                            { num, bool -> enteredNum = num; isAmountEntered = bool
-                            }, navController
+                            navController
                         )
                     }
                     composable("pinInput") {
@@ -78,6 +77,7 @@ class MainActivity : ComponentActivity(), NfcAdapter.ReaderCallback, EMVReaderLo
                             navController
                         )
                     }
+
                 }
             }
         }
@@ -85,26 +85,19 @@ class MainActivity : ComponentActivity(), NfcAdapter.ReaderCallback, EMVReaderLo
 
     @Composable
     fun StartController(
-        context: Context,
-        pass: (Int, Boolean) -> Unit,
         navController: NavController
     ) {
-        var enteredNum by remember { mutableStateOf(0) }
-        var isAmountEntered by remember { mutableStateOf(true) }
-        pass(enteredNum, isAmountEntered)
         Column() {
             if (isAmountEntered) {
                 AmountEntryScreen { number ->
-                    enteredNum = number
+                    enteredAmount = number
                     isAmountEntered = false
                     navController.navigate("nfcReader")
                 }
-        }
-            //            else {
-//                navController.navigate("nfcReader")
-//            }
+            }
         }
     }
+
     private fun enableForegroundDispatch(activity: MainActivity, adapter: NfcAdapter?) {
 
         val intent = Intent(activity.applicationContext, activity.javaClass)
@@ -258,54 +251,84 @@ fun NfcReaderScreen(
     enteredAmount: Int,
     navController: NavController
 ) {
-    val nfcStatusText = remember { mutableStateOf("NFC Status: ") }
-    val isCardPresent = remember { mutableStateOf(false) }
-    val enteredPIN = remember { mutableStateOf("") }
-    val isTransactionSuccessful = remember { mutableStateOf(false) } // New state variable
+    val isCardPresent = remember { mutableStateOf(false) } // Track if the card is detected
+
+    val adapter = NfcAdapter.getDefaultAdapter(context)
+
+    // Enable foreground dispatch when the composable is active
+    DisposableEffect(context) {
+        val intent = Intent(context, MainActivity::class.java)
+        intent.flags = Intent.FLAG_ACTIVITY_SINGLE_TOP
+        val pendingIntent = PendingIntent.getActivity(
+            context,
+            0,
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT
+        )
+        val intentFilter = IntentFilter(NfcAdapter.ACTION_TAG_DISCOVERED)
+        val filters = arrayOf(intentFilter)
+        val techList = arrayOf(arrayOf(NfcA::class.java.name))
+        adapter?.enableForegroundDispatch(context as MainActivity, pendingIntent, filters, techList)
+
+        onDispose {
+            adapter?.disableForegroundDispatch(context as MainActivity)
+        }
+    }
+
+    // Handle NFC tag discovery
+    val readerCallback: NfcAdapter.ReaderCallback = NfcAdapter.ReaderCallback { tag ->
+        isCardPresent.value = true
+
+        // Perform your NFC communication logic here
+        val nfcA = NfcA.get(tag)
+        nfcA.connect()
+
+        // Example: Sending a command to the NFC tag
+        val commandBytes = byteArrayOf(0x00, 0xA4.toByte(), /* ... */)
+        val responseBytes = nfcA.transceive(commandBytes)
+
+        // Interpret the responseBytes and make decisions based on the result
+        if (responseBytes.isNotEmpty()) {
+            // Tag responded, perform further actions
+            if (enteredAmount > 100) {
+                navController.navigate("pinInput")
+            } else {
+                navController.navigate("success")
+            }
+        } else {
+
+        }
+
+        nfcA.close()
+    }
+
+    // Initialize NFC reader when composable is active
+    DisposableEffect(context) {
+        adapter?.enableReaderMode(
+            context as MainActivity,
+            readerCallback,
+            NfcAdapter.FLAG_READER_NFC_A or NfcAdapter.FLAG_READER_SKIP_NDEF_CHECK,
+            null
+        )
+
+        onDispose {
+            adapter?.disableReaderMode(context as MainActivity)
+        }
+    }
 
     Column(
         modifier = Modifier
             .fillMaxSize()
             .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
+        verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Text(text = nfcStatusText.value)
-
-        if (isCardPresent.value) {
-            if (enteredAmount > 100) {
-//                IF Amount is greater than 100 move to pin input screen and check is the entered Pin
-//                is equal to a value say 4848
-//                then display success on a clear screen
-                navController.navigate("pinInput")
-            } else {
-                Text(text = "Transaction successful...") // Show card found message
-//                Display success on a clear screen
-            }
-        }
-
         Button(
             onClick = {
-                val nfcAdapter = NfcAdapter.getDefaultAdapter(context)
-                if (nfcAdapter != null) {
-                    if (!nfcAdapter.isEnabled) {
-                        nfcStatusText.value = "NFC Status: NFC is not enabled"
-                        return@Button
-                    }
-
-                    nfcStatusText.value = "NFC Status: Detecting NFC Tag..."
-                    val tag = nfcAdapter
-
-                    // TODO: Handle tag connection, transceive data, and update status
-                    // For example:
-                    isCardPresent.value = true
-
-                } else {
-                    nfcStatusText.value = "NFC Status: NFC is not supported on this device"
-                }
+                // This button's click action won't be used as NFC communication is automatic
             }
         ) {
-            Text(text = "Detect NFC")
+            Text(text = "Tap card to read")
         }
     }
 }
