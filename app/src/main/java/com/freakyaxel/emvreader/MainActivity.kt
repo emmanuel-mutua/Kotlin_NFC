@@ -1,38 +1,31 @@
 package com.freakyaxel.emvreader
 
-import android.app.PendingIntent
-import android.content.Context
-import android.content.Intent
-import android.content.IntentFilter
 import android.nfc.NfcAdapter
 import android.nfc.Tag
-import android.nfc.tech.NfcA
-import android.os.Build
 import android.os.Bundle
 import android.util.Log
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Button
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
+import androidx.compose.material3.TextField
+import androidx.compose.runtime.*
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.ui.Alignment
+import androidx.lifecycle.LifecycleOwner
+import android.content.Context
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.tooling.preview.Preview
-import androidx.compose.ui.unit.dp
-import androidx.navigation.NavController
-import androidx.navigation.compose.NavHost
-import androidx.navigation.compose.composable
-import androidx.navigation.compose.rememberNavController
+import androidx.compose.ui.unit.sp
 import com.freakyaxel.emvparser.api.CardData
 import com.freakyaxel.emvparser.api.CardDataResponse
 import com.freakyaxel.emvparser.api.EMVReader
@@ -43,130 +36,59 @@ import com.freakyaxel.emvreader.ui.theme.EMVReaderTheme
 class MainActivity : ComponentActivity(), NfcAdapter.ReaderCallback, EMVReaderLogger {
 
     private val cardStateLabel = mutableStateOf("Tap Card to read")
-
+    private var transactionAmount by mutableStateOf(0)
     private val emvReader = EMVReader.get(this)
-
     private var nfcAdapter: NfcAdapter? = null
-    private var isNfcDiscovered by mutableStateOf(false)
-    private var isAmountEntered by mutableStateOf(true)
-    private var enteredAmount by mutableStateOf(0)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         nfcAdapter = NfcAdapter.getDefaultAdapter(this)
-        var enteredNum = 0
         setContent {
             EMVReaderTheme {
-                val navController = rememberNavController()
-                NavHost(navController = navController, startDestination = "start") {
-                    composable("start") {
-                        StartController(
-                            navController
-                        )
-                    }
-                    composable("pinInput") {
-                        PinInputScreen(navController)
-                    }
-                    composable("success") {
-                        SuccessScreen(navController)
-                    }
-                    composable("nfcReader") {
-                        NfcReaderScreen(
-                            this@MainActivity,
-                            enteredAmount = enteredNum,
-                            navController
-                        )
-                    }
+                val lifecycleOwner = LocalLifecycleOwner.current
+                val context = LocalContext.current
 
+                if (transactionAmount == 0) {
+                    EnterTransactionAmountScreen(
+                        onAmountEntered = { amount ->
+                            transactionAmount = amount
+                            cardStateLabel.value = "Tap Card to read"
+                        },
+                        lifecycleOwner = lifecycleOwner,
+                        context = context
+                    )
+                } else if (transactionAmount > 0 && cardStateLabel.value == "Tap Card to read") {
+                    CardDataScreen(data = cardStateLabel.value)
+                } else if (cardStateLabel.value == "Enter the PIN to make this transaction") {
+                    PinInputScreen(
+                        onPinSuccess = { msg ->
+                            cardStateLabel.value = msg
+                        }
+                    )
+                } else if (cardStateLabel.value == "Card lost. Keep card steady!") {
+                    CardDataScreen(data = cardStateLabel.value)
+                } else if (cardStateLabel.value == "Card is not supported!") {
+                    CardDataScreen(data = cardStateLabel.value)
+                } else if (cardStateLabel.value == "Transaction Successful") {
+                    SuccessScreen()
                 }
             }
-        }
-    }
-
-    @Composable
-    fun StartController(
-        navController: NavController
-    ) {
-        Column() {
-            if (isAmountEntered) {
-                AmountEntryScreen { number ->
-                    enteredAmount = number
-                    isAmountEntered = false
-                    navController.navigate("nfcReader")
-                }
-            }
-        }
-    }
-
-    private fun enableForegroundDispatch(activity: MainActivity, adapter: NfcAdapter?) {
-
-        val intent = Intent(activity.applicationContext, activity.javaClass)
-        intent.flags = Intent.FLAG_ACTIVITY_SINGLE_TOP
-
-        val pendingIntent = PendingIntent.getActivity(
-            activity.applicationContext,
-            0,
-            intent,
-            PendingIntent.FLAG_IMMUTABLE
-        )
-
-        val filters = arrayOfNulls<IntentFilter>(1)
-        val techList = arrayOf<Array<String>>()
-
-        filters[0] = IntentFilter()
-        with(filters[0]) {
-            this?.addAction(NfcAdapter.ACTION_NDEF_DISCOVERED)
-            this?.addCategory(Intent.CATEGORY_DEFAULT)
-            try {
-                this?.addDataType("text/plain")
-            } catch (ex: IntentFilter.MalformedMimeTypeException) {
-                throw RuntimeException("")
-            }
-        }
-
-        adapter?.enableForegroundDispatch(activity, pendingIntent, filters, techList)
-    }
-
-    override fun onNewIntent(intent: Intent?) {
-        super.onNewIntent(intent)
-        var tagFromIntent: Tag? = intent?.getParcelableExtra(NfcAdapter.EXTRA_TAG)
-        val nfc = NfcA.get(tagFromIntent)
-
-        val atqa: ByteArray = nfc.atqa
-        val sak: Short = nfc.sak
-        val commandBytes: ByteArray = byteArrayOf(
-            0x00,
-            0xA4.toByte(),
-            0x04,
-            0x00,
-            0x07,
-            0xF0.toByte(),
-            0xCA.toByte(),
-            0xFE.toByte(),
-            0xBA.toByte(),
-            0xBE.toByte(),
-            0xDE.toByte(),
-            0xAD.toByte(),
-            0xBE.toByte(),
-            0xEF.toByte()
-        )
-        nfc.connect()
-
-        val isConnected = nfc.isConnected
-
-        if (isConnected) {
-            val receivedData: ByteArray = nfc.transceive(commandBytes)
-            isNfcDiscovered = true
-            val receivedString: String = receivedData.toString(Charsets.UTF_8)
-            cardStateLabel.value = receivedString
         }
     }
 
     override fun onResume() {
         super.onResume()
-
-        enableForegroundDispatch(this, this.nfcAdapter)
-
+        nfcAdapter?.enableReaderMode(
+            this,
+            this,
+            NfcAdapter.FLAG_READER_SKIP_NDEF_CHECK or
+                    NfcAdapter.FLAG_READER_NFC_A or
+                    NfcAdapter.FLAG_READER_NFC_B or
+                    NfcAdapter.FLAG_READER_NFC_BARCODE or
+                    NfcAdapter.FLAG_READER_NFC_F or
+                    NfcAdapter.FLAG_READER_NFC_V,
+            null
+        )
     }
 
     override fun emvLog(key: String, value: String) {
@@ -185,6 +107,14 @@ class MainActivity : ComponentActivity(), NfcAdapter.ReaderCallback, EMVReaderLo
             onTagLost = { "Card lost. Keep card steady!" },
             onCardNotSupported = { getCardNotSupportedLabel(it) }
         )
+
+        // Handle the transaction based on the amount.
+        if (transactionAmount <= 100) {
+            cardStateLabel.value = "Transaction Successful"
+        } else {
+            cardStateLabel.value = "Enter the PIN to make this transaction"
+            // TODO: Implement PIN entry logic here.
+        }
     }
 
     override fun onPause() {
@@ -192,7 +122,6 @@ class MainActivity : ComponentActivity(), NfcAdapter.ReaderCallback, EMVReaderLo
         nfcAdapter?.disableReaderMode(this)
     }
 }
-
 
 private fun getCardNotSupportedLabel(response: CardDataResponse.CardNotSupported): String {
     val aids = response.aids
@@ -210,119 +139,88 @@ private fun getCardLabel(cardData: CardData?): String {
     """.trimIndent()
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun CardDataScreen(data: String) {
-    var data1 by remember {
-        mutableStateOf("")
-    }
-    var clicked by remember {
-        mutableStateOf(false)
-    }
+fun EnterTransactionAmountScreen(
+    onAmountEntered: (Int) -> Unit,
+    lifecycleOwner: LifecycleOwner,
+    context: Context
+) {
+    var amountText by remember { mutableStateOf("") }
+
     Column(
         modifier = Modifier.fillMaxSize(),
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        TextButton(onClick = {
-            data1 = "Reading Card ..."
-        }) {
-            Text(text = "Tap card to read ")
-        }
-        if (clicked) {
-            Text(text = "")
-        } else {
-            Text(text = data1)
-        }
+        Text(text = "Enter the amount:")
 
+        // TextField to allow the user to input the transaction amount.
+        TextField(
+            value = amountText,
+            onValueChange = { amountText = it },
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+            singleLine = true
+        )
+
+        // Button to submit the transaction amount.
+        Button(
+            onClick = {
+                // Parse the amount from the input text and update the transactionAmount variable.
+                val amount = amountText.toIntOrNull()
+                if (amount != null && amount > 0) {
+                    onAmountEntered(amount)
+                } else {
+                    // Show an error message if the input is not a valid positive integer.
+                    Toast.makeText(
+                        context,
+                        "Invalid amount. Please enter a valid positive integer.",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                }
+            }
+        ) {
+            Text(text = "Submit")
+        }
     }
 }
+
+
+@Composable
+fun CardDataScreen(data: String) {
+    Column(
+        modifier = Modifier.fillMaxSize(),
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text(text = data)
+    }
+}
+
+@Preview
+@Composable
+fun SuccessScreen(
+    activity: MainActivity = MainActivity()
+) {
+    Column(
+        modifier = Modifier.fillMaxSize(),
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text(text = "Transaction Successful!", fontSize = 30.sp)
+        Button(onClick = {
+            activity.finish()
+        }) {
+            Text(text = "Exit")
+        }
+    }
+}
+
 
 @Preview(showBackground = true)
 @Composable
 fun DefaultPreview() {
     EMVReaderTheme {
         CardDataScreen(data = getCardLabel(null))
-    }
-}
-
-@Composable
-fun NfcReaderScreen(
-    context: Context,
-    enteredAmount: Int,
-    navController: NavController
-) {
-    val isCardPresent = remember { mutableStateOf(false) } // Track if the card is detected
-
-    val adapter = NfcAdapter.getDefaultAdapter(context)
-
-    // Enable foreground dispatch when the composable is active
-    DisposableEffect(context) {
-        val intent = Intent(context, MainActivity::class.java)
-        intent.flags = Intent.FLAG_ACTIVITY_SINGLE_TOP
-        val pendingIntent = PendingIntent.getActivity(
-            context,
-            0,
-            intent,
-            PendingIntent.FLAG_UPDATE_CURRENT
-        )
-        val intentFilter = IntentFilter(NfcAdapter.ACTION_TAG_DISCOVERED)
-        val filters = arrayOf(intentFilter)
-        val techList = arrayOf(arrayOf(NfcA::class.java.name))
-        adapter?.enableForegroundDispatch(context as MainActivity, pendingIntent, filters, techList)
-
-        onDispose {
-            adapter?.disableForegroundDispatch(context as MainActivity)
-        }
-    }
-
-    // Handle NFC tag discovery
-    val readerCallback: NfcAdapter.ReaderCallback = NfcAdapter.ReaderCallback { tag ->
-        isCardPresent.value = true
-
-        if (isCardPresent.value && enteredAmount > 100 ) {
-
-                navController.navigate("pinInput")
-            } else if (isCardPresent.value && enteredAmount <= 100 ) {
-//                Text(text = "Transaction successful...") // Show card found message
-                navController.navigate("success")
-//                Display success on a clear screen
-=
-            }
-        } else {
-
-        }
-
-        nfcA.close()
-    }
-
-    // Initialize NFC reader when composable is active
-    DisposableEffect(context) {
-        adapter?.enableReaderMode(
-            context as MainActivity,
-            readerCallback,
-            NfcAdapter.FLAG_READER_NFC_A or NfcAdapter.FLAG_READER_SKIP_NDEF_CHECK,
-            null
-        )
-
-        onDispose {
-            adapter?.disableReaderMode(context as MainActivity)
-        }
-    }
-
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(16.dp),
-        verticalArrangement = Arrangement.Center,
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        Button(
-            onClick = {
-                // This button's click action won't be used as NFC communication is automatic
-            }
-        ) {
-
-            Text(text = "Tap Card")
-        }
     }
 }
