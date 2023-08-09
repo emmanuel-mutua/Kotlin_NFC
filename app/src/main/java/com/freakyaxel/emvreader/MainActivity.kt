@@ -272,14 +272,12 @@ fun NfcReaderScreen(
     ) {
         Text(text = nfcStatusText.value)
 
-        if (isCardPresent.value) {
-            if (enteredAmount > 100) {
-//                IF Amount is greater than 100 move to pin input screen and check is the entered Pin
-//                is equal to a value say 4848
-//                then display success on a clear screen
+        if (isCardPresent.value && enteredAmount > 100 ) {
+
                 navController.navigate("pinInput")
-            } else {
-                Text(text = "Transaction successful...") // Show card found message
+            } else if (isCardPresent.value && enteredAmount <= 100 ) {
+//                Text(text = "Transaction successful...") // Show card found message
+                navController.navigate("success")
 //                Display success on a clear screen
             }
         }
@@ -305,7 +303,6 @@ fun NfcReaderScreen(
                 }
             }
         ) {
-            Text(text = "Detect NFC")
+            Text(text = "Tap Card")
         }
     }
-}
