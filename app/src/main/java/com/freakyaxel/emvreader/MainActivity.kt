@@ -279,21 +279,14 @@ fun NfcReaderScreen(
     val readerCallback: NfcAdapter.ReaderCallback = NfcAdapter.ReaderCallback { tag ->
         isCardPresent.value = true
 
-        // Perform your NFC communication logic here
-        val nfcA = NfcA.get(tag)
-        nfcA.connect()
+        if (isCardPresent.value && enteredAmount > 100 ) {
 
-        // Example: Sending a command to the NFC tag
-        val commandBytes = byteArrayOf(0x00, 0xA4.toByte(), /* ... */)
-        val responseBytes = nfcA.transceive(commandBytes)
-
-        // Interpret the responseBytes and make decisions based on the result
-        if (responseBytes.isNotEmpty()) {
-            // Tag responded, perform further actions
-            if (enteredAmount > 100) {
                 navController.navigate("pinInput")
-            } else {
+            } else if (isCardPresent.value && enteredAmount <= 100 ) {
+//                Text(text = "Transaction successful...") // Show card found message
                 navController.navigate("success")
+//                Display success on a clear screen
+=
             }
         } else {
 
@@ -328,7 +321,8 @@ fun NfcReaderScreen(
                 // This button's click action won't be used as NFC communication is automatic
             }
         ) {
-            Text(text = "Tap card to read")
+
+            Text(text = "Tap Card")
         }
     }
 }
